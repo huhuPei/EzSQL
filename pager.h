@@ -1,5 +1,5 @@
 #ifndef __EZ_SQL_PAGER__
-#define __EZ_SQL_PAGER_
+#define __EZ_SQL_PAGER__
 
 #include <stdint.h>
 
