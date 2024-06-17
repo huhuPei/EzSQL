@@ -1,8 +1,11 @@
-#ifndef __EZ_SQL__
-#define __EZ_SQL__
+#ifndef __EZ_SQL_TABLE__
+#define __EZ_SQL_TABLE__
 
 #include <stdint.h>
 #include <stdbool.h>
+
+#include "pager.h"
+
 #define COLUMN_USERNAME_SIZE 32
 #define COLUMN_EMAIL_SIZE 255
 typedef struct {
@@ -11,12 +14,10 @@ typedef struct {
     char email[COLUMN_EMAIL_SIZE + 1];
 } Row;
 
-#define TABLE_MAX_PAGES 100
-
 typedef void*(*RowFunc)(uint32_t);
 typedef struct {
     uint32_t num_rows;
-    void* pages[TABLE_MAX_PAGES];
+    Pager* pager;
 } Table;
 
 void* locate_row(Table*, uint32_t);
@@ -25,6 +26,9 @@ void deserialize_row(void*, Row*);
 void print_row(Row*);
 Table* new_table();
 void free_table(Table*);
+Table* open_db(const char*);
+void* close_db(Table*);
+Pager* pager_open(const char*);
 bool table_full(Table*);
 
 #endif

@@ -43,7 +43,7 @@ typedef struct {
 
 InputBuffer* new_input_buffer();
 void close_input_buffer(InputBuffer*);
-void read(InputBuffer*);
+void read_stdin(InputBuffer*);
 void print_prompt();
 MetaCommandResult do_meta_command(const char*);
 PrepareResult prepare_insert_statement(char*, Statement*);
@@ -65,7 +65,7 @@ void close_input_buffer(InputBuffer* input_buffer) {
     free(input_buffer);
 }
 
-void read(InputBuffer* input_buffer) {
+void read_stdin(InputBuffer* input_buffer) {
     ssize_t bytes_read = getline(&(input_buffer->buffer), &(input_buffer->buffer_size), stdin);
     if (bytes_read <= 0) {
         printf("Error reading input\n");
@@ -134,7 +134,8 @@ ExecuteResult execute_insert(Statement* statement, Table* table) {
         return EXECUTE_TABLE_FULL;
     }
     Row* row_data = &(statement->row_data);
-    serialize_row(row_data, locate_row(table, table->num_rows));
+    void* dest = locate_row(table, table->num_rows);
+    serialize_row(row_data, dest);
     table->num_rows += 1;
     return EXECUTE_SUCCESS;
 }
@@ -149,17 +150,22 @@ ExecuteResult execute_select(Statement* statement, Table* table) {
 }
 
 int main(int argc, char* argv[]) {
-    Table* table = new_table();
+    if (argc < 2) {
+        printf("Must supply a database filename.\n");
+        exit(EXIT_FAILURE);
+    }
+    char* filename = argv[1];
+    Table* table = open_db(filename);
     InputBuffer* input_buffer = new_input_buffer();
     bool running = true;
     while (running) {
         print_prompt();
-        read(input_buffer);
+        read_stdin(input_buffer);
         if (input_buffer->buffer[0] == ':') {
             switch (do_meta_command(input_buffer->buffer)){
                 case META_COMMAND_EXIT:
                     close_input_buffer(input_buffer);
-                    free_table(table);
+                    close_db(table);
                     printf("Bye.\n");
                     exit(EXIT_SUCCESS);
                 case META_COMMAND_SUCCESS:

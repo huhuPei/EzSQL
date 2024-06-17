@@ -1,8 +1,11 @@
+#include "table.h"
+
 #include <stdlib.h>
 #include <stdio.h>
+#include <stdint.h>
 #include <string.h>
 #include <stdbool.h>
-#include "table.h"
+#include <unistd.h>
 
 #define size_of_field(Struct, Field) sizeof(((Struct*)0)->Field)
 
@@ -14,17 +17,14 @@ const uint32_t USERNAME_OFFSET = ID_OFFSET + ID_SIZE;
 const uint32_t EMAIL_OFFSET = USERNAME_OFFSET + USERNAME_SIZE;
 const uint32_t ROW_SIZE = ID_SIZE + USERNAME_SIZE + EMAIL_SIZE;
 
-const uint32_t PAGE_SIZE = 4096;
 const uint32_t ROWS_PER_PAGE = PAGE_SIZE / ROW_SIZE;
-const uint32_t TABLE_MAX_ROWS = ROWS_PER_PAGE * TABLE_MAX_PAGES;
+const uint32_t TABLE_MAX_ROWS = ROWS_PER_PAGE * MAX_PAGES;
 
 void* locate_row(Table* table, uint32_t row_num){
     uint32_t page_num = row_num / ROWS_PER_PAGE;
-    if (!table->pages[page_num]) {
-        table->pages[page_num] = malloc(PAGE_SIZE);
-    }
+    void* page = get_page(table->pager, page_num);
     uint32_t offset = row_num % ROWS_PER_PAGE * ROW_SIZE;
-    return table->pages[page_num] + offset;
+    return page + offset;
 }
 
 void serialize_row(Row* row, void* dest) {
@@ -46,19 +46,65 @@ void print_row(Row* row) {
 Table* new_table() {
     Table* table = (Table*) malloc(sizeof(Table));
     table->num_rows = 0;
-    for (int i = 0; i < TABLE_MAX_PAGES; i++) {
-        table->pages[i] = NULL;
+    for (int i = 0; i < MAX_PAGES; i++) {
+        table->pager->pages[i] = NULL;
     }    
     return table;
 }
 
 void free_table(Table* table) {
-    for (int i = 0; i < TABLE_MAX_PAGES; i++) {
-        if (table->pages[i]) free(table->pages[i]);        
+    for (int i = 0; i < MAX_PAGES; i++) {
+        if (table->pager->pages[i]) free(table->pager->pages[i]);        
     }
     free(table);
 }
 
 bool table_full(Table* table) {
     return table->num_rows >= TABLE_MAX_ROWS;
+}
+
+Table* open_db(const char* filename) {
+    Pager* pager = pager_open(filename);
+    Table* table = malloc(sizeof(Table));
+    table->pager = pager;
+    table->num_rows = pager->file_size / ROW_SIZE;
+    return table;
+}
+
+void* close_db(Table* table) {
+    Pager* pager = table->pager;
+    uint32_t full_num_pages = table->num_rows / ROWS_PER_PAGE;
+    uint32_t partial_page_size = (table->num_rows % ROWS_PER_PAGE) * ROW_SIZE;
+    printf("rows: %d\n", table->num_rows);
+    for (uint32_t i = 0; i < full_num_pages; i++) {
+        if (pager->pages[i]) {
+            pager_flush(pager, i, PAGE_SIZE);
+            free(pager->pages[i]);
+            pager->pages[i] = NULL;
+        } 
+    }
+    if (partial_page_size > 0) {
+        uint32_t page_num = full_num_pages;
+        if (pager->pages[page_num]) {
+            printf("part page \n");
+            pager_flush(pager, page_num, partial_page_size);
+            free(pager->pages[page_num]);
+            pager->pages[page_num] = NULL;
+        }
+    }
+
+    if (close(pager->fd)) {
+        printf("Error closing db file.\n");
+        exit(EXIT_FAILURE);
+    }
+
+    for (uint32_t i = 0; i < MAX_PAGES; i++) {
+       void* page = pager->pages[i];
+       if (page) {
+           free(page);
+           pager->pages[i] = NULL;
+       }
+    }
+    free(pager);
+    free(table);
 }
