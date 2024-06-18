@@ -4,6 +4,8 @@
 #include <string.h>
 
 #include "table.h"
+#include "cursor.h"
+#include "btree.h"
 
 typedef struct {
     char* buffer;
@@ -45,7 +47,7 @@ InputBuffer* new_input_buffer();
 void close_input_buffer(InputBuffer*);
 void read_stdin(InputBuffer*);
 void print_prompt();
-MetaCommandResult do_meta_command(const char*);
+MetaCommandResult do_meta_command(const char*, Table*);
 PrepareResult prepare_insert_statement(char*, Statement*);
 PrepareResult prepare_statement(char*, Statement*);
 ExecuteResult execute_statement(Statement*, Table*);
@@ -77,9 +79,13 @@ void read_stdin(InputBuffer* input_buffer) {
 
 void print_prompt() { printf("db > "); }
 
-MetaCommandResult do_meta_command(const char* command) {
+MetaCommandResult do_meta_command(const char* command, Table* table) {
     if (strcmp(command, ":exit") == 0) {
         return META_COMMAND_EXIT;
+    } else if (strcmp(command, ":btree") == 0) {
+        printf("Tree:\n");
+        print_leaf_node(get_page(table->pager, 0));
+        return META_COMMAND_SUCCESS;
     } else {
         return META_COMMAND_INVALID_COMMAND;
     }
@@ -134,18 +140,28 @@ ExecuteResult execute_insert(Statement* statement, Table* table) {
         return EXECUTE_TABLE_FULL;
     }
     Row* row_data = &(statement->row_data);
-    void* dest = locate_row(table, table->num_rows);
-    serialize_row(row_data, dest);
-    table->num_rows += 1;
+    //void* dest = locate_row(table, table->num_rows);
+    Cursor* cursor = table_end(table);
+    // serialize_row(row_data, cursor_value(cursor));
+    // table->num_rows += 1;
+    cursor_insert(cursor, row_data->id, row_data);
+    free(cursor);
     return EXECUTE_SUCCESS;
 }
 
 ExecuteResult execute_select(Statement* statement, Table* table) {
     Row row;
-    for (uint32_t i = 0; i < table->num_rows; i++) {
-        deserialize_row(locate_row(table, i), &row);
+    Cursor* cursor = table_start(table);
+    while (!(cursor->end_of_table)) {
+        deserialize_row(cursor_value(cursor), &row);
         print_row(&row);
+        cursor_next(cursor);
     }
+    // for (uint32_t i = 0; i < table->num_rows; i++) {
+    //     deserialize_row(locate_row(table, i), &row);
+    //     print_row(&row);
+    // }
+    free(cursor);
     return EXECUTE_SUCCESS;
 }
 
@@ -162,7 +178,7 @@ int main(int argc, char* argv[]) {
         print_prompt();
         read_stdin(input_buffer);
         if (input_buffer->buffer[0] == ':') {
-            switch (do_meta_command(input_buffer->buffer)){
+            switch (do_meta_command(input_buffer->buffer, table)){
                 case META_COMMAND_EXIT:
                     close_input_buffer(input_buffer);
                     close_db(table);

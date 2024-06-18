@@ -16,11 +16,11 @@ typedef struct {
 
 typedef void*(*RowFunc)(uint32_t);
 typedef struct {
-    uint32_t num_rows;
     Pager* pager;
+    uint32_t root_page_num;
 } Table;
 
-void* locate_row(Table*, uint32_t);
+void* locate_row(Table*, uint32_t, uint32_t);
 void serialize_row(Row*, void*);
 void deserialize_row(void*, Row*);
 void print_row(Row*);

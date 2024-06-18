@@ -7,8 +7,10 @@
 #include <stdbool.h>
 #include <unistd.h>
 
-#define size_of_field(Struct, Field) sizeof(((Struct*)0)->Field)
+#include "btree.h"
+#include "pager.h"
 
+#define size_of_field(Struct, Field) sizeof(((Struct*)0)->Field)
 const uint32_t ID_SIZE = size_of_field(Row, id);
 const uint32_t USERNAME_SIZE = size_of_field(Row, username);
 const uint32_t EMAIL_SIZE = size_of_field(Row, email);
@@ -17,14 +19,9 @@ const uint32_t USERNAME_OFFSET = ID_OFFSET + ID_SIZE;
 const uint32_t EMAIL_OFFSET = USERNAME_OFFSET + USERNAME_SIZE;
 const uint32_t ROW_SIZE = ID_SIZE + USERNAME_SIZE + EMAIL_SIZE;
 
-const uint32_t ROWS_PER_PAGE = PAGE_SIZE / ROW_SIZE;
-const uint32_t TABLE_MAX_ROWS = ROWS_PER_PAGE * MAX_PAGES;
-
-void* locate_row(Table* table, uint32_t row_num){
-    uint32_t page_num = row_num / ROWS_PER_PAGE;
+void* locate_row(Table* table, uint32_t page_num, uint32_t cell_num){
     void* page = get_page(table->pager, page_num);
-    uint32_t offset = row_num % ROWS_PER_PAGE * ROW_SIZE;
-    return page + offset;
+    return leaf_node_value(page, cell_num);
 }
 
 void serialize_row(Row* row, void* dest) {
@@ -43,14 +40,14 @@ void print_row(Row* row) {
   printf("(%d, %s, %s)\n", row->id, row->username, row->email);
 }
 
-Table* new_table() {
-    Table* table = (Table*) malloc(sizeof(Table));
-    table->num_rows = 0;
-    for (int i = 0; i < MAX_PAGES; i++) {
-        table->pager->pages[i] = NULL;
-    }    
-    return table;
-}
+// Table* new_table() {
+//     Table* table = (Table*) malloc(sizeof(Table));
+//     table->num_rows = 0;
+//     for (int i = 0; i < MAX_PAGES; i++) {
+//         table->pager->pages[i] = NULL;
+//     }    
+//     return table;
+// }
 
 void free_table(Table* table) {
     for (int i = 0; i < MAX_PAGES; i++) {
@@ -60,37 +57,31 @@ void free_table(Table* table) {
 }
 
 bool table_full(Table* table) {
-    return table->num_rows >= TABLE_MAX_ROWS;
+    void* node = get_page(table->pager, table->root_page_num);
+    return leaf_node_full(node);
 }
 
 Table* open_db(const char* filename) {
     Pager* pager = pager_open(filename);
-    Table* table = malloc(sizeof(Table));
+    Table* table = (Table*) malloc(sizeof(Table));
     table->pager = pager;
-    table->num_rows = pager->file_size / ROW_SIZE;
+    table->root_page_num = 0;
+    if (pager->num_pages == 0) {
+    // New database file. Initialize page 0 as leaf node.
+        void* root_node = get_page(pager, 0);
+        initialize_leaf_node(root_node);
+    }
     return table;
 }
 
 void* close_db(Table* table) {
     Pager* pager = table->pager;
-    uint32_t full_num_pages = table->num_rows / ROWS_PER_PAGE;
-    uint32_t partial_page_size = (table->num_rows % ROWS_PER_PAGE) * ROW_SIZE;
-    printf("rows: %d\n", table->num_rows);
-    for (uint32_t i = 0; i < full_num_pages; i++) {
+    for (uint32_t i = 0; i < pager->num_pages; i++) {
         if (pager->pages[i]) {
-            pager_flush(pager, i, PAGE_SIZE);
+            pager_flush(pager, i);
             free(pager->pages[i]);
             pager->pages[i] = NULL;
         } 
-    }
-    if (partial_page_size > 0) {
-        uint32_t page_num = full_num_pages;
-        if (pager->pages[page_num]) {
-            printf("part page \n");
-            pager_flush(pager, page_num, partial_page_size);
-            free(pager->pages[page_num]);
-            pager->pages[page_num] = NULL;
-        }
     }
 
     if (close(pager->fd)) {
